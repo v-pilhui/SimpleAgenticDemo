@@ -1,5 +1,4 @@
-﻿using System.Text.Json;
-using ModelContextProtocol.Client;
+﻿using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
 namespace SimpleAgenticWebApp;
@@ -19,68 +18,12 @@ public sealed class CalculatorMcpClient : IAsyncDisposable
         _clientTask = McpClient.CreateAsync(transport);
     }
 
-    public async Task<IList<McpClientTool>> ListToolNamesAsync()
+    public async Task<IList<McpClientTool>> ListToolsAsync(CancellationToken cancellationToken)
     {
         var client = await _clientTask;
-        var tools = await client.ListToolsAsync();
+        var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
 
         return tools;
-
-        //var openAiTools = tools.Select(tool => new
-        //{
-        //    type = "function",
-        //    function = new
-        //    {
-        //        name = tool.Name,
-        //        description = tool.Description,
-        //        parameters = tool.JsonSchema
-        //    }
-        //});
-
-        //return tools
-        //    .Select(t => t.Name)
-        //    .ToList();
-    }
-
-    public async Task<string> CalculateAsync(
-        string argumentsJson,
-        CancellationToken cancellationToken)
-    {
-        using var doc = JsonDocument.Parse(argumentsJson);
-
-        var expression = doc.RootElement
-            .GetProperty("expression")
-            .GetString() ?? "";
-
-        var client = await _clientTask;
-
-        var tools = await client.ListToolsAsync();
-
-        var calculateTool = tools.FirstOrDefault(t =>
-            string.Equals(t.Name, "calculate", StringComparison.OrdinalIgnoreCase));
-
-        if (calculateTool is null)
-        {
-            return "Calculator MCP tool was not found.";
-        }
-
-        var result = await client.CallToolAsync(
-            calculateTool.Name,
-            new Dictionary<string, object?>
-            {
-                ["expression"] = expression
-            },
-            cancellationToken: cancellationToken);
-
-        var text = string.Join(
-            "\n",
-            result.Content
-                .OfType<TextContentBlock>()
-                .Select(c => c.Text));
-
-        return string.IsNullOrWhiteSpace(text)
-            ? "Calculator MCP tool returned no text."
-            : text;
     }
 
     public async ValueTask DisposeAsync()
