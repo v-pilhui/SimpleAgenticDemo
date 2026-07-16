@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="CalculatorMcpServer/CalculatorMcpServer.csproj" />
+  <Project Path="SimpleAgenticWebApp/SimpleAgenticWebApp.csproj" />
+</Solution>

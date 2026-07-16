@@ -1,0 +1,171 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Simple Agentic .NET Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            padding: 0;
+        }
+
+        .app {
+            max-width: 780px;
+            margin: 40px auto;
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .chat {
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 16px;
+            height: 420px;
+            overflow-y: auto;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 14px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            line-height: 1.4;
+        }
+
+        .user {
+            background: #dbeafe;
+            margin-left: 80px;
+        }
+
+        .assistant {
+            background: #e5e7eb;
+            margin-right: 80px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 18px;
+            border: none;
+            border-radius: 10px;
+            background: #2563eb;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #94a3b8;
+        }
+
+        .hint {
+            color: #666;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <h1>Simple Agentic .NET Chat</h1>
+
+        <div id="chat" class="chat"></div>
+
+        <div class="input-row">
+            <input id="message" placeholder="Ask something..." />
+            <button id="send">Send</button>
+        </div>
+
+        <div class="hint">
+            Try: <b>What time is it?</b> or <b>Calculate 25 * (8 + 4)</b>
+        </div>
+    </div>
+
+    <script>
+        const chat = document.getElementById("chat");
+        const input = document.getElementById("message");
+        const sendButton = document.getElementById("send");
+
+        const history = [];
+
+        function addMessage(role, content) {
+            const div = document.createElement("div");
+            div.className = "message " + role;
+            div.textContent = content;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            input.value = "";
+            sendButton.disabled = true;
+
+            addMessage("user", message);
+            history.push({ role: "user", content: message });
+
+            try {
+                const response = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        history
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Request failed.");
+                }
+
+                addMessage("assistant", data.reply);
+                history.push({ role: "assistant", content: data.reply });
+            } catch (error) {
+                addMessage("assistant", "Error: " + error.message);
+            } finally {
+                sendButton.disabled = false;
+                input.focus();
+            }
+        }
+
+        sendButton.addEventListener("click", sendMessage);
+
+        input.addEventListener("keydown", event => {
+            if (event.key === "Enter") {
+                sendMessage();
+            }
+        });
+
+        addMessage("assistant", "Hi! I am a simple agentic ChatGPT web app. I can answer questions and use tools.");
+    </script>
+</body>
+</html>
