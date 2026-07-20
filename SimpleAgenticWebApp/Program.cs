@@ -38,7 +38,7 @@ app.MapPost("/api/chat", async (
         .UseKernelFunctionInvocation(loggerFactory)
         .Build(serviceProvider);
 
-    var messages = new List<Microsoft.Extensions.AI.ChatMessage>
+    var messages = new List<ChatMessage>
     {
         new(ChatRole.System, """
             You are a helpful agent inside an ASP.NET Core web app.
@@ -50,7 +50,7 @@ app.MapPost("/api/chat", async (
 
     foreach (var msg in request.History.TakeLast(10))
     {
-        messages.Add(new Microsoft.Extensions.AI.ChatMessage(MapRole(msg.Role), msg.Content));
+        messages.Add(new ChatMessage(MapRole(msg.Role), msg.Content));
     }
 
     var getCurrentTimeTool = AIFunctionFactory.Create(

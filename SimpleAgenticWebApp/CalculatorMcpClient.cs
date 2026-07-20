@@ -1,5 +1,4 @@
 ﻿using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
 
 namespace SimpleAgenticWebApp;
 
