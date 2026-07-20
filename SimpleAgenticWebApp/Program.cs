@@ -1,17 +1,11 @@
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
+using Microsoft.Extensions.AI;
+using Microsoft.SemanticKernel;
 using SimpleAgenticWebApp;
 using SimpleAgenticWebApp.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<CalculatorMcpClient>();
-
-builder.Services.AddHttpClient("openai", client =>
-{
-    client.BaseAddress = new Uri("https://api.openai.com/");
-});
 
 var app = builder.Build();
 
@@ -20,9 +14,11 @@ app.UseStaticFiles();
 
 app.MapPost("/api/chat", async (
     ChatRequest request,
-    IHttpClientFactory httpClientFactory,
     IConfiguration config,
-    CalculatorMcpClient calculatorMcpClient
+    CalculatorMcpClient calculatorMcpClient,
+    ILoggerFactory loggerFactory,
+    IServiceProvider serviceProvider,
+    CancellationToken cancellationToken
 ) =>
 {
     var apiKey = config["OpenAI:ApiKey"];
@@ -36,152 +32,57 @@ app.MapPost("/api/chat", async (
     }
 
     var model = config["OpenAI:Model"] ?? "gpt-5.1";
+    IChatClient chatClient = new OpenAI.Chat.ChatClient(model, apiKey)
+        .AsIChatClient()
+        .AsBuilder()
+        .UseKernelFunctionInvocation(loggerFactory)
+        .Build(serviceProvider);
 
-    var http = httpClientFactory.CreateClient("openai");
-    http.DefaultRequestHeaders.Authorization =
-        new AuthenticationHeaderValue("Bearer", apiKey);
-
-    var messages = new List<object>
+    var messages = new List<ChatMessage>
     {
-        new
-        {
-            role = "system",
-            content = """
+        new(ChatRole.System, """
             You are a helpful agent inside an ASP.NET Core web app.
             You can call tools when useful.
             If a tool result is needed, call the tool first.
             Keep answers short, clear, and practical.
-            """
-        }
+            """)
     };
 
     foreach (var msg in request.History.TakeLast(10))
     {
-        messages.Add(new
-        {
-            role = msg.Role,
-            content = msg.Content
-        });
+        messages.Add(new ChatMessage(MapRole(msg.Role), msg.Content));
     }
 
-    var tools = new List<object>
+    var getCurrentTimeTool = AIFunctionFactory.Create(
+        () => DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+        "get_current_time",
+        "Get the current server time.");
+
+    IList<AITool> tools = [getCurrentTimeTool, .. await calculatorMcpClient.ListToolsAsync(cancellationToken)];
+
+    var response = await chatClient.GetResponseAsync(
+        messages,
+        new ChatOptions
+        {
+            Tools = tools
+        },
+        cancellationToken);
+
+    return Results.Ok(new SimpleAgenticWebApp.Models.ChatResponse
     {
-        new
-        {
-            type = "function",
-            function = new
-            {
-                name = "get_current_time",
-                description = "Get the current server time.",
-                parameters = new
-                {
-                    type = "object",
-                    properties = new { },
-                    required = Array.Empty<string>()
-                }
-            }
-        }
-    };
-
-    tools.AddRange((await calculatorMcpClient.ListToolNamesAsync()).Select(tool => new
-    {
-        type = "function",
-        function = new
-        {
-            name = tool.Name,
-            description = tool.Description,
-            parameters = tool.JsonSchema
-        }
-    }));
-
-    for (var step = 0; step < 4; step++)
-    {
-        var payload = new
-        {
-            model,
-            messages,
-            tools,
-            tool_choice = "auto"
-        };
-
-        using var response = await http.PostAsync(
-            "v1/chat/completions",
-            new StringContent(
-                JsonSerializer.Serialize(payload),
-                Encoding.UTF8,
-                "application/json"));
-
-        var json = await response.Content.ReadAsStringAsync();
-
-        if (!response.IsSuccessStatusCode)
-        {
-            return Results.Problem(json);
-        }
-
-        using var doc = JsonDocument.Parse(json);
-        var message = doc.RootElement
-            .GetProperty("choices")[0]
-            .GetProperty("message");
-
-        if (message.TryGetProperty("tool_calls", out var toolCalls))
-        {
-            messages.Add(JsonSerializer.Deserialize<object>(message.GetRawText())!);
-
-            foreach (var toolCall in toolCalls.EnumerateArray())
-            {
-                var toolCallId = toolCall.GetProperty("id").GetString()!;
-                var function = toolCall.GetProperty("function");
-                var functionName = function.GetProperty("name").GetString()!;
-                var argumentsJson = function.GetProperty("arguments").GetString() ?? "{}";
-
-                var toolResult = await RunToolAsync(
-                    functionName,
-                    argumentsJson,
-                    calculatorMcpClient,
-                    CancellationToken.None);
-
-                messages.Add(new
-                {
-                    role = "tool",
-                    tool_call_id = toolCallId,
-                    content = toolResult
-                });
-            }
-
-            continue;
-        }
-
-        var finalAnswer = message.GetProperty("content").GetString();
-
-        return Results.Ok(new ChatResponse
-        {
-            Reply = finalAnswer ?? ""
-        });
-    }
-
-    return Results.Ok(new ChatResponse
-    {
-        Reply = "I tried to use tools, but the agent loop reached its limit."
+        Reply = response.Text ?? ""
     });
 });
 
 app.Run();
 
-static async Task<string> RunToolAsync(
-    string functionName,
-    string argumentsJson,
-    CalculatorMcpClient calculatorMcpClient,
-    CancellationToken cancellationToken)
+static ChatRole MapRole(string role)
 {
-    return functionName switch
+    return role.ToLowerInvariant() switch
     {
-        "get_current_time" =>
-            DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
-
-        "calculate" =>
-            await calculatorMcpClient.CalculateAsync(argumentsJson, cancellationToken),
-
-        _ =>
-            $"Unknown tool: {functionName}"
+        "assistant" => ChatRole.Assistant,
+        "system" => ChatRole.System,
+        "tool" => ChatRole.Tool,
+        _ => ChatRole.User
     };
 }
